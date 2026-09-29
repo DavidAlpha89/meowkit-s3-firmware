@@ -6,7 +6,12 @@ All notable changes to MeowKit-S3 firmware are documented here.
 
 ### PC Monitor
 
-- Replaced static gauge images with five live LVGL bars in a 320 × 240 dark/green layout.
+- Restored the original two-layer artwork in Flash, with live segmented meters,
+  CPU/GPU clock speeds, RAM usage, GPU fan load and RPM; no SD-card image reads.
+- Removed obsolete app05 gauge/background arrays and the unused duplicate system
+  background; retained the original PNGs and added a repeatable asset converter.
+- Added live LVGL meters with a five-color scale: cyan, sky blue, violet,
+  amber, and coral red, including the vertical used-memory meter.
 - Fixed missing degree glyphs, overflowing hardware names and ambiguous RAM/clock labels.
 - Added waiting, live and five-second stale-data states; unavailable readings show `--`.
 - Replaced delimiter-triggered partial parsing and blocking delays with a bounded
@@ -16,8 +21,17 @@ All notable changes to MeowKit-S3 firmware are documented here.
   source snapshot, original resources, provenance and setup/build documentation.
 - Added host protocol regressions and actual LVGL layout/lifecycle checks.
 
-Validation: host tests and firmware build are recorded in the PC Monitor guide;
-post-change on-device acceptance remains required before a firmware release.
+PC Monitor operation was confirmed on hardware by the maintainer. Host tests and
+firmware build results are recorded in the PC Monitor guide. This is a source
+update, not a new firmware release.
+
+### VU Meter
+
+- Embedded both VU Meter images in firmware Flash so the app no longer needs
+  those files on the SD card.
+- Composited the needle and mask in one frame to prevent mask flicker while the
+  needle responds to sound.
+- Removed the obsolete SD-card copies and cleaned up app resources on exit.
 
 ## [1.0.1] - 2026-09-23
 

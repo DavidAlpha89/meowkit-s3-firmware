@@ -35,6 +35,13 @@ int main() {
     p.reset(); assert(send(p, "C36c 13%|G44c 46%|R13,8GB|RA2,2|RL86|GMT12288|GMU1000|GML8|GFANL0|GRPM0|GPWR30|CPU:Intel Core i7-7700KGPU:NVIDIA GeForce RTX 4070 SUPER|GCC2500||GMC10000||GSC0||CHC1600|\r\n"));
     assert(fabs(p.frame().ramUsed - 13.8f) < .001);
     assert(p.frame().cpuMHz == 1600 && p.frame().gpuTemp == 44);
+    assert(p.frame().gpuMHz == 2500 && p.frame().gpuFanRPM == 0 && p.frame().gpuFanLoad == 0);
+    p.reset(); assert(send(p, "C32c50%|G79c99%|R8|RA8|GCC2200MHz|GFANL62%|GRPM944RPM|\n"));
+    assert(p.frame().gpuMHz == 2200 && p.frame().gpuFanRPM == 944 && p.frame().gpuFanLoad == 62);
+    assert(send(p, "C32c50%|G79c99%|R8|RA8|GCCnan|GFANL101|GRPM-1|\n"));
+    assert(isnan(p.frame().gpuMHz) && isnan(p.frame().gpuFanRPM) && isnan(p.frame().gpuFanLoad));
+    assert(send(p, std::string(sample) + "\n"));
+    assert(isnan(p.frame().gpuMHz) && isnan(p.frame().gpuFanRPM) && isnan(p.frame().gpuFanLoad));
     // Unsigned millis arithmetic remains valid across wrap-around.
     p.reset(); assert(!send(p, sample, UINT32_MAX - 50)); assert(p.idle(100));
     p.reset(); send(p, "truncated"); assert(!p.idle(1600));

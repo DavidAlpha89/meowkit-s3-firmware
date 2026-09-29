@@ -199,3 +199,42 @@ for path, body in ((sound_asm_out, sound_asm), (sound_cpp_out, sound_cpp)):
 
 print(f"[embed_sound] boot={boot_size/1024:.1f}/{boot_source_size/1024:.1f} KB, "
       f"button={button_size/1024:.1f} KB, limit={duration_ms} ms")
+
+# Embed VU Meter artwork in flash. The application decodes these PNGs directly
+# from RODATA, so it no longer depends on files being present on the SD card.
+vu_asset_dir = os.path.join(project_dir, "src", "app", "app_03", "assets")
+vu_bg_path = os.path.join(vu_asset_dir, "vu_meter_bg.png")
+vu_mask_path = os.path.join(vu_asset_dir, "vu_meter_mask.png")
+vu_asm_out = os.path.join(project_dir, "src", "app", "app_03", "vu_meter_assets.S")
+vu_header_out = os.path.join(project_dir, "src", "app", "app_03", "vu_meter_assets.h")
+
+vu_bg_exists = os.path.isfile(vu_bg_path)
+vu_mask_exists = os.path.isfile(vu_mask_path)
+vu_bg_size = os.path.getsize(vu_bg_path) if vu_bg_exists else 0
+vu_mask_size = os.path.getsize(vu_mask_path) if vu_mask_exists else 0
+
+vu_asm = ("    .section .rodata\n"
+          "    .balign 4\n" +
+          incbin_symbol("vu_meter_bg_png", vu_bg_path, vu_bg_exists, vu_bg_size) +
+          incbin_symbol("vu_meter_mask_png", vu_mask_path, vu_mask_exists, vu_mask_size))
+vu_header = ("#pragma once\n"
+             "#include <stddef.h>\n"
+             "#include <stdint.h>\n\n"
+             "#ifdef __cplusplus\n"
+             "extern \"C\" {\n"
+             "#endif\n"
+             "extern const uint8_t vu_meter_bg_png[];\n"
+             "extern const uint8_t vu_meter_mask_png[];\n"
+             "#ifdef __cplusplus\n"
+             "}\n"
+             "#endif\n\n"
+             f"static constexpr size_t vu_meter_bg_png_len = {vu_bg_size}u;\n"
+             f"static constexpr size_t vu_meter_mask_png_len = {vu_mask_size}u;\n")
+
+for path, body in ((vu_asm_out, vu_asm), (vu_header_out, vu_header)):
+    existing = open(path).read() if os.path.isfile(path) else ""
+    if existing != body:
+        with open(path, "w") as f:
+            f.write(body)
+
+print(f"[embed_vu] bg={vu_bg_size/1024:.1f} KB, mask={vu_mask_size/1024:.1f} KB")

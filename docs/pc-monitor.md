@@ -6,8 +6,8 @@ Connect a USB data cable, start HardwareSerialMonitor on Windows, and open
 
 ![PC Monitor interface](pc-monitor-preview.png)
 
-Actual LVGL host render at 320 × 240, using sample values from the maintainer's
-test. This preview is not a photograph of the updated firmware on hardware.
+Actual LVGL host render at 320 × 240, using illustrative values from the design
+reference. This preview is not an on-device test or a hardware-support claim.
 
 ## Windows client
 
@@ -27,17 +27,21 @@ matching-version source project and license. See
 
 ## Read the screen
 
-The two upper cards show CPU and GPU information. Long names scroll within
-their cards. Each card shows temperature in degrees Celsius and load in percent.
-The CPU card also shows clock speed in MHz; the GPU card shows total VRAM in GB.
+The upper-left panel shows the CPU model, clock speed in MHz, temperature and
+load. The upper-right panel shows total RAM in GB and memory use in percent.
+The lower panel shows the GPU model, VRAM, clock speed, fan load, fan RPM,
+temperature and load. Long CPU and GPU model names scroll within their panels.
 
-The lower card shows RAM used / total GB. All five bars follow received data.
-Load and RAM bars use 0–100%; temperature bars use 0–100 degrees Celsius and
-cap visually at 100, while the numeric value can exceed it. Bar colors change
-at 70 and 90; they are visual thresholds, not hardware-specific alarm limits.
+All five meters follow received data. Load and RAM meters use 0–100%; temperature
+meters use 0–100 degrees Celsius and cap visually at 100, while the numeric value
+can exceed it. Horizontal meters reveal five fixed color segments as values rise.
+The RAM meter uses the same cyan, blue, violet, amber and coral palette, filling
+from bottom to top in five 20% segments.
+These colors are visual guides, not hardware-specific alarm limits. Large numbers
+use a smaller font when needed to keep the units readable.
 
 - **Connect USB – start the PC client:** waiting for the first complete sample.
-- **Live:** valid packets are arriving.
+- **Live monitoring:** values update; the connection prompt is hidden.
 - **Data stopped:** no complete packet for five seconds; old readings are cleared.
 - **--:** the client did not provide a usable value for that field.
 
@@ -59,15 +63,29 @@ The MeowKit display cannot generate a reading that the client does not send.
 | --- | --- |
 | `src/app/app_05/pc_monitor.cpp` | App lifecycle, serial receive, display updates and stale-data state |
 | `src/app/app_05/pc_monitor_protocol.h` | Fixed-size, host-testable HSM parser |
+| `src/app/app_05/pc_monitor_view.cpp` | Shared firmware/host-test presentation of decoded values |
 | `src/app/app_05/asset/ui_PC_Monitor.c` | Native LVGL 320 × 240 layout |
-| `src/app/app_05/asset/` | UI globals, built-in font and original image resources |
+| `src/app/app_05/asset/pc_monitor_images.c` | Generated const Flash image data |
+| `tools/embed_pc_monitor_assets.ps1` | Rebuild image data from the two original PNGs |
 | `software/HardwareSerialMonitor/source/` | Vendored Windows project and resources |
 | `software/HardwareSerialMonitor/downloads/` | User download ZIP including source |
 | `test/pc_monitor_protocol_test.cpp` | Protocol regression tests |
 | `test/pc_monitor_ui/` | Real LVGL host rendering and lifecycle checks |
 
-The app does not read images from an SD card. Original artwork stays in app05
-for reference; the new screen uses native widgets and the existing numeric font.
+The app does not read images from an SD card. `pc_monitor_bg.png` is placed at
+(0, 0); `pc_monitor_ui_X10,Y2.png` is placed at (10, 2). Both original PNGs remain
+in app05. The generated RGB565 + alpha arrays occupy 438,780 bytes in Flash and
+need no PNG decoding or full-image RAM buffers during use. Live labels and meters
+are layered over the artwork. The old duplicate background and gauge arrays have
+been removed; shared system fonts and other applications are unchanged.
+
+After changing either PNG, regenerate the checked-in C resource on Windows:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/embed_pc_monitor_assets.ps1
+```
+
+Ordinary firmware builds do not require this conversion step.
 
 ## Serial protocol
 
@@ -80,6 +98,8 @@ C36c 13%|G44c 46%|R13.8GB|RA2.2|RL86|GMT12288|GMU1000|GML8|GFANL0|GRPM0|GPWR30|C
 
 `C` and `G` carry temperature and load; `R` is RAM used; `RA` is RAM available.
 Total RAM is their sum. `GMT` is total VRAM in MB; `CHC` is CPU clock in MHz.
+`GCC` is GPU clock in MHz; `GFANL` is fan load in percent; `GRPM` is fan RPM.
+These fields are optional; missing sensors display `--`, not a fabricated zero.
 CPU and GPU names may share a token or arrive as separate tokens.
 
 The receiver publishes after a newline or the next CPU sample. For clients
@@ -109,16 +129,21 @@ Render the actual LVGL screen (GCC example on Windows):
 python tools/test_pc_monitor_ui.py --cc C:/msys64/mingw64/bin/gcc.exe
 ```
 
-This writes preview BMPs to ignored `output/`, checks text widths and the degree
-glyph, and opens/closes the screen 30 times. Build the firmware with `pio run`.
+This writes preview BMPs to ignored `output/`, renders actual decoded packets
+through the firmware view code, checks normal/maximum/missing values, verifies
+partial redraws against a full redraw, and opens/closes the screen 30 times.
+Build the firmware with `pio run`.
 
 Hardware acceptance after flashing:
 
 1. Connect the supplied Windows client; compare CPU/GPU values with its source sensors.
-2. Check the full long model names, `°C`, `100%`, RAM units, clock and VRAM.
+2. With the SD card removed, check both image layers, long model names, `°C`,
+   `100%`, RAM units, both clock speeds, VRAM and available fan readings.
 3. Stop the client; confirm readings clear after five seconds. Restart it and
    confirm automatic recovery without restarting MeowKit.
 4. Hold B while receiving data; reopen PC Monitor repeatedly and check stability.
 5. Unplug/reconnect USB and test an unsupported sensor (`--`).
 
-Host rendering and firmware compilation do not replace this on-device test.
+The maintainer has confirmed normal PC Monitor operation on hardware. Repeat
+the checks above after future display or protocol changes. This source update
+does not create a new firmware release.

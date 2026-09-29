@@ -25,7 +25,6 @@ namespace MOONCAKE::APPS
         void onRunning() override;
         void onClose() override;
     private:
-        DEVICES* _device = nullptr;
         pc_monitor::Parser _parser;
         lv_obj_t* _previousScreen = nullptr;
         uint32_t _lastDataMs = 0;

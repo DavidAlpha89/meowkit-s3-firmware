@@ -128,7 +128,6 @@ LV_IMG_DECLARE(ui_img_multi_column_picker_png);    // assets/multi_column_picker
 LV_IMG_DECLARE(ui_img_788348331);                  // assets/picker_bg (hash-named asset)
 LV_IMG_DECLARE(ui_img_picker_time_bg_png);         // assets/picker_time_bg.png
 LV_IMG_DECLARE(ui_img_message_box_bg_png);         // assets/message_box_bg.png
-LV_IMG_DECLARE(ui_img_pc_monitor_bg_png);    // assets/pc_monitor_bg.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_name_14);

@@ -10,6 +10,7 @@ namespace pc_monitor {
 struct Frame {
     float cpuTemp = NAN, cpuLoad = NAN, gpuTemp = NAN, gpuLoad = NAN;
     float ramUsed = NAN, ramAvailable = NAN, cpuMHz = NAN, gpuMemoryMB = NAN;
+    float gpuMHz = NAN, gpuFanLoad = NAN, gpuFanRPM = NAN;
     char cpuName[96] = {}, gpuName[96] = {};
 };
 class Parser {
@@ -33,7 +34,7 @@ public:
         return false;
     }
     bool idle(uint32_t now) {
-        // HSM ends packets with a pipe rather than a reliable newline.
+        // Accept legacy senders that end with a pipe but omit the newline.
         if ((uint32_t)(now - lastByte_) >= 150 && !length_ && !overflow_)
             return publish();
         if ((uint32_t)(now - lastByte_) >= 1500) {
@@ -103,6 +104,12 @@ private:
             pending_.gpuMemoryMB = number(token_ + 3, 1048576, "MB");
         } else if (!strncmp(token_, "CHC", 3)) {
             pending_.cpuMHz = number(token_ + 3, 20000, "MHz");
+        } else if (!strncmp(token_, "GCC", 3)) {
+            pending_.gpuMHz = number(token_ + 3, 20000, "MHz");
+        } else if (!strncmp(token_, "GFANL", 5)) {
+            pending_.gpuFanLoad = number(token_ + 5, 100, "%");
+        } else if (!strncmp(token_, "GRPM", 4)) {
+            pending_.gpuFanRPM = number(token_ + 4, 100000, "RPM");
         } else if (token_[0] == 'G' && token_[1] != 'M') {
             if (temperatureLoad(token_ + 1, pending_.gpuTemp, pending_.gpuLoad)) seen_ |= 2;
         } else if (!strncmp(token_, "RA", 2)) {
