@@ -17,3 +17,6 @@ Thumbs.db
 dist/
 output/
 upload-log.txt
+
+# Local project documentation (published separately)
+docs/
