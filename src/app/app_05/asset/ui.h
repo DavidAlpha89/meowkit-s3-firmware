@@ -36,6 +36,8 @@ LV_IMG_DECLARE(ui_img_temp2_full_png);    // assets/temp2_full.png
 // SCREEN: ui_PC_Monitor
 void ui_PC_Monitor_screen_init(void);
 void ui_pc_monitor_init(void); // optional helper to init and load screen
+void ui_pc_monitor_status(const char *text, bool live);
+void ui_pc_monitor_destroy(void);
 
 // Widgets
 extern lv_obj_t * ui_PC_Monitor;

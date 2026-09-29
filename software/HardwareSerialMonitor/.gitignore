@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/*.suo
+**/Config.ini
+**/*.pdb
+**/*.mdb
+**/*.bak
+**/Resources - Copy

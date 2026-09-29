@@ -2,6 +2,23 @@
 
 All notable changes to MeowKit-S3 firmware are documented here.
 
+## [Unreleased]
+
+### PC Monitor
+
+- Replaced static gauge images with five live LVGL bars in a 320 × 240 dark/green layout.
+- Fixed missing degree glyphs, overflowing hardware names and ambiguous RAM/clock labels.
+- Added waiting, live and five-second stale-data states; unavailable readings show `--`.
+- Replaced delimiter-triggered partial parsing and blocking delays with a bounded
+  stream parser, packet validation, decimal-comma support and malformed-input recovery.
+- Released app-owned LVGL objects on exit to prevent repeated-open memory growth.
+- Added the user-tested HardwareSerialMonitor v1.4.4 Windows download, matching-version
+  source snapshot, original resources, provenance and setup/build documentation.
+- Added host protocol regressions and actual LVGL layout/lifecycle checks.
+
+Validation: host tests and firmware build are recorded in the PC Monitor guide;
+post-change on-device acceptance remains required before a firmware release.
+
 ## [1.0.1] - 2026-09-23
 
 ### Added

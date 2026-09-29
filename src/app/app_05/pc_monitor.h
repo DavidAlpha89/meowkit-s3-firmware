@@ -9,6 +9,7 @@
 #pragma once
 #include <mooncake.h>
 #include "../../MeowKit.h"
+#include "pc_monitor_protocol.h"
 
 using namespace mooncake;
 
@@ -25,5 +26,10 @@ namespace MOONCAKE::APPS
         void onClose() override;
     private:
         DEVICES* _device = nullptr;
+        pc_monitor::Parser _parser;
+        lv_obj_t* _previousScreen = nullptr;
+        uint32_t _lastDataMs = 0;
+        bool _hasData = false;
+        bool _stale = false;
     };
 }

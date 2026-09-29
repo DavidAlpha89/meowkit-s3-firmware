@@ -1,212 +1,77 @@
-/**
- * @file pc_monitor.cpp
- * @author Mingo
- * @brief PC Monitor app implementation for Mooncake
- * @version 0.1
- * @date 2025-08-05
- * @copyright Copyright (c) 2025
- */
 #include "pc_monitor.h"
-#include "lvgl.h"
-
-// Use LVGL UI assets (fonts + images + positioned widgets)
+#include <math.h>
 extern "C" {
 #include "asset/ui.h"
 }
 
-String inputString = "";
-bool stringComplete = false;
-const int Serial0_eventDelay = 15;
-static bool s_hasData = false; // The value will not be displayed until the first complete frame of data is received.
-
-void style_01(DEVICES* _device) {
-    //------------------------------------------- Update UI widgets (LVGL) ----------------------------------------------------//
-    // Background and bars are already positioned by SquareLine (3 images + 2 fonts)
-
- //------------------------------------------- CPU & GPU name ----------------------------------------------------//
-  String cpuName, gpuName;
-
-  /* Extract CPU name */
-  int cpuIndex = inputString.indexOf("CPU:");
-  if (cpuIndex != -1) {
-      cpuIndex += (inputString.indexOf("Intel", cpuIndex) != -1) ? 10 : 8; // Handling Intel offsets
-      int gpuIndex = inputString.indexOf("GPU:");
-      cpuName = (gpuIndex != -1) ? inputString.substring(cpuIndex, gpuIndex) : inputString.substring(cpuIndex);
-  }
-
-  /*  Extract GPU name */
-  int gpuIndex = inputString.indexOf("GPU:");
-  if (gpuIndex != -1) {
-      gpuIndex += (inputString.indexOf("NVIDIA", gpuIndex) != -1) ? 18 : 8; // Dealing with NVIDIA offset
-      int gpuEnd = inputString.indexOf("|", gpuIndex);
-      gpuName = (gpuEnd != -1) ? inputString.substring(gpuIndex, gpuEnd) : inputString.substring(gpuIndex);
-  }
-
-    /* Display CPU & GPU names */
-#ifdef Manual_cpuName
-    lv_label_set_text(ui_cpu_name, set_CPUname);
-#else
-    lv_label_set_text(ui_cpu_name, cpuName.c_str());
-#endif
-
-#ifdef Manual_gpuName
-    lv_label_set_text(ui_gpu_name, set_GPUname);
-#else
-    lv_label_set_text(ui_gpu_name, gpuName.c_str());
-#endif
-
-    //------------------------------------------ CPU Load/Temp -------------------------------------------------//
-
-  /*CPU Display String*/
-  int cpuStringStart = inputString.indexOf("C");
-  int cpuDegree = inputString.indexOf("c");
-  int cpuStringLimit = inputString.indexOf("|");
-  String cpuString1 = inputString.substring(cpuStringStart + 1, cpuDegree);
-  String cpuString2 = inputString.substring(cpuDegree + 1, cpuStringLimit - 1);
-
-    /*CPU TEMPERATURE*/
-    lv_label_set_text(ui_cpu_temp, cpuString1.c_str());
-    /*CPU LOAD, ALL CORES*/
-    lv_label_set_text(ui_cpu_percent, cpuString2.c_str());
-
-  //------------------------------------------ GPU Load/Temp -------------------------------------------------//
-
-  /*GPU Display String*/
-  int gpuStringStart = inputString.indexOf("G", cpuStringLimit);
-  int gpuDegree = inputString.indexOf("c", gpuStringStart);
-  int gpuStringLimit = inputString.indexOf("|", gpuStringStart);
-  String gpuString1 = inputString.substring(gpuStringStart + 1, gpuDegree);
-  String gpuString2 = inputString.substring(gpuDegree + 1, gpuStringLimit - 1);
-
-    /*GPU TEMPERATURE*/
-    lv_label_set_text(ui_gpu_temp, gpuString1.c_str());
-    /*GPU LOAD*/
-    lv_label_set_text(ui_gpu_percent, gpuString2.c_str());
-
-  //----------------------------------------SYSTEM  RAM TOTAL---------------------------------------------------//
-  /*SYSTEM RAM String*/
-  int ramStringStart = inputString.indexOf("R", gpuStringLimit);
-  int ramStringLimit = inputString.indexOf("|", ramStringStart);
-  String ramString = inputString.substring(ramStringStart + 1 , ramStringLimit);
-
-
-  /*SYSTEM RAM AVALABLE String*/
-  int AramStringStart = inputString.indexOf("RA", ramStringLimit);
-  int AramStringLimit = inputString.indexOf("|", AramStringStart);
-  String AramString = inputString.substring(AramStringStart + 2 , AramStringLimit);
-
-  /*SYSTEM RAM TOTAL String*/
-  double intRam = atof(ramString.c_str());
-  double intAram = atof(AramString.c_str());
-  //double  intRamSum = intRam + intAram;
-  float  intRamSum = intRam + intAram; //float to handle the decimal point when printed (intRamSum,0)
-
-  /*RAM USED/TOTAL*/
-    {
-        char ramBuf[24];
-        snprintf(ramBuf, sizeof(ramBuf), "%s/%.0fGB", ramString.c_str(), intRamSum);
-        lv_label_set_text(ui_RAM, ramBuf);
-    }
-
-
-
-    //------------------------------------------ CPU Freq -------------------------------------------------//
-
-  /*CPU Freq Display String*/
-  int cpuCoreClockStart = inputString.indexOf("CHC") + 3;
-  int cpuCoreClockEnd = inputString.indexOf("|", cpuCoreClockStart);
-  String cpuClockString = inputString.substring(cpuCoreClockStart, cpuCoreClockEnd);
-
-  /*CPU Core Freq*/
-    {
-        String mhz = cpuClockString + String("MHz");
-        lv_label_set_text(ui_mhz, mhz.c_str());
-    }
-
-   //---------------------------------------------Total GPU Memory-----------------------------------------------------------
-
-   int gpuMemoryStart = inputString.indexOf("GMT") + 3;
-   int gpuMemoryEnd = inputString.indexOf("|", gpuMemoryStart);
-   String gpuMemoryString = inputString.substring(gpuMemoryStart, gpuMemoryEnd);
- 
-   double totalGPUmem = atof(gpuMemoryString.c_str());
-   double totalGPUmemSum = totalGPUmem / 1024;    // divide by 1024 to get the correct value
-   float  totalGPUmemSumDP = totalGPUmemSum ;     // float to handle the decimal point when printed (totalGPUmemSumDP, 0)
-
-    {
-        char vramBuf[16];
-#ifdef Manual_gpuRam
-        snprintf(vramBuf, sizeof(vramBuf), "%s", set_GPUram);
-#else
-        snprintf(vramBuf, sizeof(vramBuf), "%.0fGB", totalGPUmemSumDP);
-#endif
-        lv_label_set_text(ui_gpu_ram, vramBuf);
-    }
+namespace {
+void text(lv_obj_t* label, const char* content) {
+    if (strcmp(lv_label_get_text(label), content)) lv_label_set_text(label, content);
+}
+void value(lv_obj_t* label, float number, const char* format) {
+    char buffer[40];
+    if (isfinite(number)) snprintf(buffer, sizeof(buffer), format, number);
+    else snprintf(buffer, sizeof(buffer), "--");
+    text(label, buffer);
+}
+void reading(lv_obj_t* label, float number) {
+    // Three-digit readings must fit without pushing the unit outside its card.
+    lv_obj_set_style_text_font(label, isfinite(number) && roundf(number) >= 100
+        ? &lv_font_montserrat_14 : &ui_font_pc_temp, 0);
+    value(label, number, "%.0f");
+}
+void meter(lv_obj_t* bar, float number) {
+    int amount = isfinite(number) ? (int)roundf(number) : 0;
+    lv_bar_set_value(bar, amount, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(amount >= 90 ? 0xFF7954 :
+                                             amount >= 70 ? 0xF2CC60 : 0xB8EB00), LV_PART_INDICATOR);
+}
+void render(const pc_monitor::Frame& f) {
+    text(ui_cpu_name, f.cpuName[0] ? f.cpuName : "CPU name unavailable");
+    text(ui_gpu_name, f.gpuName[0] ? f.gpuName : "GPU name unavailable");
+    reading(ui_cpu_temp, f.cpuTemp); reading(ui_cpu_percent, f.cpuLoad);
+    reading(ui_gpu_temp, f.gpuTemp); reading(ui_gpu_percent, f.gpuLoad);
+    value(ui_mhz, f.cpuMHz, "%.0f MHz");
+    value(ui_gpu_ram, f.gpuMemoryMB / 1024.0f, "%.1f GB VRAM");
+    meter(ui_temp2, f.cpuTemp); meter(ui_temp1, f.cpuLoad);
+    meter(ui_temp3, f.gpuTemp); meter(ui_temp4, f.gpuLoad);
+    const float total = f.ramUsed + f.ramAvailable;
+    if (isfinite(total) && total > 0) {
+        char buffer[48];
+        snprintf(buffer, sizeof(buffer), "%.1f / %.1f GB", f.ramUsed, total);
+        text(ui_RAM, buffer); meter(ui_Image5, 100.0f * f.ramUsed / total);
+    } else { text(ui_RAM, "-- / -- GB"); meter(ui_Image5, NAN); }
+}
 }
 
-
-namespace MOONCAKE::APPS
-{
-    PCMonitor::PCMonitor(DEVICES* device)
-        : _device(device)
-    {
-        setAppInfo().name = "PCMonitor";
+namespace MOONCAKE::APPS {
+PCMonitor::PCMonitor(DEVICES* device) : _device(device) { setAppInfo().name = "PCMonitor"; }
+void PCMonitor::onOpen() {
+    _parser.reset(); _hasData = false; _stale = false; _lastDataMs = 0;
+    _previousScreen = lv_scr_act();
+    ui_pc_monitor_init(); render(pc_monitor::Frame());
+    ui_pc_monitor_status("Connect USB - start the PC client", false);
+}
+void PCMonitor::onRunning() {
+    bool updated = false;
+    // Bound receive work so the launcher keeps polling long-press B.
+    for (size_t n = 0; n < 512 && Serial.available(); ++n)
+        updated = _parser.feed((char)Serial.read(), millis()) || updated;
+    if (!Serial.available()) updated = _parser.idle(millis()) || updated;
+    if (updated) {
+        _lastDataMs = millis(); _hasData = true; _stale = false;
+        render(_parser.frame()); ui_pc_monitor_status("Live  |  Hold B to exit", true);
+    } else if (_hasData && !_stale && millis() - _lastDataMs >= 5000) {
+        _stale = true; render(pc_monitor::Frame());
+        ui_pc_monitor_status("Data stopped - check the PC client", false);
     }
-
-    void PCMonitor::onOpen()
-    {
-        // Initialize PC Monitor
-        inputString.reserve(200); // Reserve string space
-        s_hasData = false;        // Mark: No valid data has been received
-
-        // Loading the LVGL interface (two fonts, three images)
-        ui_pc_monitor_init();
-
-        // Clear all numerical display when entering for the first time to avoid displaying old values ​​or placeholder text
-        // CPU/GPU name
-        lv_label_set_text(ui_cpu_name, "");
-        lv_label_set_text(ui_gpu_name, "");
-        // CPU temperature/occupancy
-        lv_label_set_text(ui_cpu_temp, "");
-        lv_label_set_text(ui_cpu_percent, "");
-        // GPU temperature/occupancy
-        lv_label_set_text(ui_gpu_temp, "");
-        lv_label_set_text(ui_gpu_percent, "");
-        // RAM used/total
-        lv_label_set_text(ui_RAM, "");
-        // CPU frequency
-        lv_label_set_text(ui_mhz, "");
-        // Total video memory
-        lv_label_set_text(ui_gpu_ram, "");
-    }
-
-    void PCMonitor::onRunning()
-    {
-        // Update PC Monitor
-        while (Serial.available()) {          
-            char inChar = (char)Serial.read();  
-            inputString += inChar;
-            if (inChar == '|') {
-                stringComplete = true;
-                delay(Serial0_eventDelay);
-            }
-        }
-
-        if (stringComplete) {
-            s_hasData = true; // Receive the first complete frame of data
-            style_01(_device);
-            inputString = "";
-            stringComplete = false;
-        }
-        // Let LVGL process tasks to refresh the screen
-        lv_timer_handler();
-        // Shorten delays to improve response and avoid long blocking times (more robust when host computer is disconnected)
-        delay(200);
-    }
-
-    void PCMonitor::onClose()
-    {
-        // Cleanup PC Monitor
-        _device->Lcd.fillScreen(TFT_BLACK);
-    }
+    lv_timer_handler(); delay(1);
+}
+void PCMonitor::onClose() {
+    // Launcher normally restores the menu before calling onClose.
+    if (ui_PC_Monitor && lv_scr_act() == ui_PC_Monitor && _previousScreen &&
+        lv_obj_is_valid(_previousScreen)) lv_scr_load(_previousScreen);
+    ui_pc_monitor_destroy(); _previousScreen = nullptr;
+    _parser.reset(); _hasData = false; _stale = false;
+}
 }
