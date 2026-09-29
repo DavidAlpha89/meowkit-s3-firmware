@@ -4,15 +4,6 @@ For setup, firmware updates, development guides, and product documentation, visi
 
 **[docs.meowkit.cc](https://docs.meowkit.cc/)**
 
-### PC Monitor for Windows
-
-[Download the Windows client](software/HardwareSerialMonitor/downloads/HardwareSerialMonitor-v1.4.4-MeowKit.zip)
- · [Setup guide](docs/pc-monitor.md)
- · [Desktop client source](software/HardwareSerialMonitor/source/)
-
-Includes the HardwareSerialMonitor v1.4.4 program, dependencies and source.
-Connect MeowKit by USB and open **Apps > PC Monitor**.
-
 ## Open-source statement
 
 MeowKit-S3 firmware is open for learning, development, and community contribution. You are welcome to study the source code, report issues, improve existing features, and build new applications for MeowKit.
