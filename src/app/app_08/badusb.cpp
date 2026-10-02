@@ -23,6 +23,7 @@ static inline bool _hidConnected() { return usb_hid_connected() != 0; }
 
 /* BLE HID - isolated wrapper avoids header collisions with USBHIDKeyboard. */
 #include "badusb_ble.h"
+#include "../../system/bluetooth_manager.h"
 
 /* ================================================================ */
 /*  LVGL number fonts  (read-only flash data, safe from any core)
@@ -475,9 +476,8 @@ bool AppBadUSB::_isConnected() const
 void AppBadUSB::_bleBegin()
 {
     if (!_bleStarted) {
-        bu_ble_begin();
-        _bleStarted = true;
-        Serial.println("[BadUSB] BLE keyboard started");
+        _bleStarted = bu_ble_begin();
+        Serial.println(_bleStarted ? "[BadUSB] BLE starting" : "[BadUSB] BLE unavailable; check Settings");
     }
 }
 
@@ -644,6 +644,7 @@ void AppBadUSB::_runFileList()
     /* [Left] / [Right] toggle USB ↔ BLE transport mode. */
     if (_device->button.Left.pressed() || _device->button.Right.pressed()) {
         _mode = (_mode == BuMode::USB) ? BuMode::BLE : BuMode::USB;
+        if (_mode == BuMode::USB) { bu_ble_end(); _bleStarted=false; }
         const char* modeLabel = (_mode == BuMode::BLE) ? "[<>]BLE" : "[<>]USB";
         _drawFooterBright3(modeLabel, "[A]Enter", "[B]Exit");
         return;
@@ -727,7 +728,13 @@ void AppBadUSB::_runFileList()
 void AppBadUSB::_enterRunning()
 {
     /* Start BLE advertising if that mode is selected. */
-    if (_mode == BuMode::BLE) _bleBegin();
+    if (_mode == BuMode::BLE) {
+        _bleBegin();
+        if (!_bleStarted) {
+            _errMsg=bluetooth_manager::enabled() ? "Bluetooth busy/error" : "Enable Bluetooth in Settings";
+            _execState=ExecState::Error;
+        }
+    }
 
     /* Invalidate all dynamic caches so first dynamic pass repaints everything. */
     _lastClkMs      = 0xFFFFFFFFul;
@@ -858,6 +865,13 @@ void AppBadUSB::_drawRunningDynamic()
     if (_execState != _lastDrawnState) {
         _drawStateBadge();
         _drawRunningFooter();
+        if (_mode == BuMode::BLE && _execState == ExecState::Error) {
+            Lcd.fillRect(2,192,316,20,BU_BG);
+            Lcd.setFont(&fonts::efontCN_16);
+            Lcd.setTextColor(TFT_RED,BU_BG);
+            Lcd.setCursor(4,194);
+            Lcd.print(_errMsg.c_str());
+        }
         _lastDrawnState = _execState;
     }
 
@@ -969,6 +983,17 @@ void AppBadUSB::_drawRunningDynamic()
  * ================================================================ */
 void AppBadUSB::_updateRunning()
 {
+    if (_mode == BuMode::BLE) {
+        const bool executing=_execState==ExecState::Running || _execState==ExecState::Delay ||
+            _execState==ExecState::StringDelay || _execState==ExecState::WaitButton ||
+            _execState==ExecState::Paused;
+        if ((_bleStarted && bu_ble_failed()) || (executing && !_bleConnected())) {
+            _stopExec();
+            bu_ble_end(); _bleStarted=false;
+            _errMsg="Bluetooth stopped. Reopen script.";
+            _execState=ExecState::Error;
+        }
+    }
     /* --- State-independent inputs --- */
     /* Any direction key = enter Layouts (Config). If a script is actively
      * running, stop it first (releases all keys) so we don't leave the host
@@ -1001,17 +1026,8 @@ void AppBadUSB::_updateRunning()
     /* --- Waiting for host to mount HID (USB) or pair (BLE) --- */
     case ExecState::WaitConnect:
         if (_isConnected()) {
-            if (_mode == BuMode::BLE) {
-                /* After the BLE link is up the host OS still needs ~500-1000 ms
-                 * to complete service discovery and write 0x0001 to the HID
-                 * input-report CCCD (subscribe to notifications).  If we send
-                 * key events before that, Bluedroid silently drops every
-                 * esp_ble_gatts_send_indicate() call and nothing reaches the host. */
-                if (_bleReadyAt == 0) _bleReadyAt = now + 1000;
-                if (now >= _bleReadyAt) _execState = ExecState::Ready;
-            } else {
-                _execState = ExecState::Ready;
-            }
+            // BLE readiness includes encryption and the host's HID subscription.
+            _execState = ExecState::Ready;
         } else {
             _bleReadyAt = 0;   /* restart timer if connection drops */
         }
@@ -1134,6 +1150,12 @@ void AppBadUSB::_updateRunning()
             }
 
             int32_t r = _parseLine(lineStr);
+            if (_mode == BuMode::BLE && (!_bleConnected() || bu_ble_failed())) {
+                _stopExec(); bu_ble_end(); _bleStarted=false;
+                _errMsg="Bluetooth stopped. Reopen script.";
+                _execState=ExecState::Error;
+                break;
+            }
 
             if (!fromRepeat && r != -1 && r > -10) {
                 const char* trimmed = _skipWs(lineStr);
@@ -1999,4 +2021,3 @@ bool AppBadUSB::_altString(const char* param)
 }
 
 } // namespace MOONCAKE::APPS
-

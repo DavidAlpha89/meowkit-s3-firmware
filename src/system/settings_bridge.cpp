@@ -9,6 +9,7 @@
  *   rapid slider drags into a single NVS write cycle and protecting flash wear.
  */
 #include "settings_bridge.h"
+#include "bluetooth_manager.h"
 #include "persist.h"
 #include "system_sound.h"
 #include <Arduino.h>
@@ -95,6 +96,7 @@ void settings_load_all(void)
     s_wifi_en = persist_get_int(PKEY_WIFI_EN, 1) != 0;
     persist_get_str(PKEY_BLE_NAME, s_ble_name, sizeof(s_ble_name), "MeowKit");
     s_ble_en  = persist_get_int(PKEY_BLE_EN,  0) != 0;
+    bluetooth_manager::setEnabled(s_ble_en);
 
     s_dirty = 0;   /* nothing to flush yet */
     Serial.printf("[settings] Loaded — bright=%d vol=%d led=%d fx=%d wifi=%d ble=%d\n",
@@ -270,6 +272,7 @@ void settings_get_ble_name(char* buf, int len)
 void settings_set_ble_en(int en)
 {
     s_ble_en = (en != 0);
+    bluetooth_manager::setEnabled(s_ble_en);
     MARK_DIRTY(D_BLE_EN);
 }
 

@@ -1,10 +1,10 @@
-/* Thin C-style wrapper around BleKeyboard so its header (which collides
- * with Arduino's USBHIDKeyboard on KeyReport / KEY_F13..F24) stays isolated
- * to a single translation unit. */
+/* BLE keyboard transport. Static GATT resources and a shared lifecycle lease;
+ * USB keyboard types remain isolated from this translation unit. */
 #pragma once
 #include <stdint.h>
 
-void bu_ble_begin();
+bool bu_ble_begin();
+bool bu_ble_failed();
 void bu_ble_end();
 bool bu_ble_connected();
 void bu_ble_press(uint8_t k);

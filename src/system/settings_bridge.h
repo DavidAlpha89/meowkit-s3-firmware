@@ -26,7 +26,7 @@
  *   PKEY_LED_EFFECT   int  WS2812B::Effect enum value (0=OFF … 6=RAINBOW)
  *   PKEY_WIFI_EN      int  0|1     WiFi enabled
  *   PKEY_BLE_NAME     str  ≤20B    BLE advertisement name
- *   PKEY_BLE_EN       int  0|1     BLE auto-start on boot
+ *   PKEY_BLE_EN       int  0|1     Bluetooth master permission
  *
  * WiFi credentials (PKEY_WIFI_SSID / PKEY_WIFI_PASS) are managed by
  * ui_wifi_bridge — not duplicated here.
@@ -138,7 +138,7 @@ bool settings_get_wifi_en(void);
 void settings_set_ble_name(const char* name);
 void settings_get_ble_name(char* buf, int len);
 
-/** Enable or disable BLE auto-start + schedule NVS write. */
+/** Set Bluetooth master permission; disabling stops the active BLE session. */
 void settings_set_ble_en(int en);
 bool settings_get_ble_en(void);
 

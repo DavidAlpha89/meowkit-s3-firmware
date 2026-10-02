@@ -2,7 +2,73 @@
 
 All notable changes to MeowKit-S3 firmware are documented here.
 
-## [Unreleased]
+## [1.0.2] - 2026-10-02
+
+### Air Mouse current behavior
+
+- Restored the saved app06 HID implementation from before unified Bluetooth
+  management, at the user's confirmed working calibration-fix baseline.
+- Retained independent click/scroll input, gyro calibration tolerance and
+  separate link/calibration status. Removed subsequent app06 manager integration
+  and pairing experiments; other applications and Infrared changes are retained.
+- Air Mouse owns its Bluetooth lifecycle independently of the Settings
+  Bluetooth switch. The maintainer confirmed the current version works on hardware.
+
+### Bluetooth coordination
+
+- Added one exclusive Bluetooth lifecycle manager for system settings and apps.
+  The persisted Bluetooth switch now gates app access; enabling it does not
+  advertise a second system device. Disabling it terminates the active session.
+- Routed BadUSB BLE through a session lease and bounded shutdown. Air Mouse uses
+  its confirmed working app-owned lifecycle as an exception to the manager.
+- Replaced BadUSB's retained Arduino BLE objects with static GATT attributes.
+  Readiness requires encryption and notification subscription. Disconnects or
+  failed sends stop execution; reopening the script requires an explicit Run.
+- Limited app07 changes to ownership, denial and shutdown guards. Advertising
+  payloads, protocols, timing and transmit settings are unchanged.
+- PC Monitor and USB transport were not changed. Host lifecycle tests cover
+  exclusive ownership, stale leases, shutdown timeouts and HID release behavior.
+- BadUSB BLE pairing/reconnection, app switching, power consumption and
+  long-run heap stability still require device testing. Existing host HID
+  caches may require removing and pairing BadUSB once after this GATT change.
+
+### Infrared
+
+- Integrated FeralCat app09 changes from commit `bace7502f682e249c355a791de8aa6ee0c9b73fc`,
+  retaining MeowKit hardware pins and the existing IR driver and databases.
+- Added Saved Remotes folder navigation, selectable save destinations, new-folder
+  creation on save, and explicit confirmation before appending to an existing file.
+- Added confirmed deletion of remote files and empty folders; the universal
+  database folder is excluded from the Saved Remotes browser.
+- Preserved decoded signal value and bit count in newly saved `.ir` entries.
+- Fixed scrolled-list refresh bounds, invalid device-entered path components,
+  malformed hex input hangs, and indicator cleanup when leaving Infrared.
+- Added source provenance and host regression tests. Physical learning, playback,
+  and SD-card operations have not been retested for this release. Upstream
+  redistribution terms still require verification.
+
+### Air Mouse
+
+- Fixed calibration failure blocking clicks and scrolling after pairing. Motion
+  calibration now tolerates stable nonzero gyro bias and brief sample delays;
+  link status and calibration feedback are displayed separately. The maintainer
+  confirmed the current Air Mouse build works on hardware.
+- Replaced app06's task-based BLE mouse wrapper with an app-owned GATT session
+  that stops advertising, disconnects, and shuts down on exit. A stable mouse
+  Bluetooth identity separates its pairing from other device profiles.
+- Added queued button press/release reports, A-button dragging, joystick scrolling,
+  three saved sensitivity levels, and touch-triggered recalibration.
+- Made calibration non-blocking, with stationary-sample checks, timeout feedback,
+  saved bias, and pointer suppression until calibration completes.
+- Preserved slow/sub-pixel movement and unsent displacement, limited diagonal
+  motion proportionally, and bounded stale movement after stalls or disconnects.
+- Paused pointer movement throughout touch scrolling and reduced UI redraws.
+- Implemented BMI270 gyro range writes with readback, refreshed scaling from the
+  hardware registers, and restored the previous range when leaving app06.
+
+Validation: motion/calibration and simulated HID lifecycle regressions pass.
+Bluetooth host compatibility, physical drift, and cross-app switching still
+require on-device validation before release.
 
 ### PC Monitor
 
@@ -22,8 +88,7 @@ All notable changes to MeowKit-S3 firmware are documented here.
 - Added host protocol regressions and actual LVGL layout/lifecycle checks.
 
 PC Monitor operation was confirmed on hardware by the maintainer. Host tests and
-firmware build results are recorded in the PC Monitor guide. This is a source
-update, not a new firmware release.
+firmware build results are recorded in the PC Monitor guide.
 
 ### VU Meter
 

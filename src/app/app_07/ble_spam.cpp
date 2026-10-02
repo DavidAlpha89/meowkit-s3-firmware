@@ -8,6 +8,8 @@
  * @copyright Copyright (c) 2025
  */
 #include "ble_spam.h"
+#include "../../system/bluetooth_manager.h"
+static bluetooth_manager::Lease s_btLease=0;
 #include "../app_common/hp_ui.h"
 #include <cstring>
 #include <cstdlib>
@@ -231,6 +233,10 @@ void App07::onOpen()
 
 void App07::onRunning()
 {
+    if (_bleInited && !bluetooth_manager::owns(s_btLease)) {
+        _bleInited=false; _advRunning=false; _advertising=false;
+        _setLedActive(false);
+    }
     _device->button.update();
     _device->button.tick();
 
@@ -600,16 +606,9 @@ void App07::_initBLE()
 {
     if (_bleInited) return;
 
-    /* Tear down any prior BLE state cleanly */
-    BLEDevice::deinit(false);
-    delay(50);
-
-    /* BLEDevice::init() boots the controller + Bluedroid stack but
-     * (importantly) does NOT create any GATT server.  We then talk
-     * directly to esp_ble_gap_*. */
-    BLEDevice::init("");
-
-    esp_ble_gap_register_callback(_gapEventCb);
+    s_btLease=bluetooth_manager::acquire(bluetooth_manager::Owner::Other,
+        "",_gapEventCb,nullptr,nullptr);
+    if (!s_btLease) return;
 
     /* TX power max on every channel — Windows Swift Pair RSSI gate
      * is around -75 dBm; weaker signal = ignored. */
@@ -630,20 +629,13 @@ void App07::_initBLE()
 
 void App07::_deinitBLE()
 {
-    if (!_bleInited) return;
-    if (_advRunning) {
-        esp_ble_gap_stop_advertising();
-        _advRunning = false;
-    }
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,     ESP_PWR_LVL_N0);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_N0);
-    _bleInited = false;
-    try { BLEDevice::deinit(false); } catch (...) {}
+    bluetooth_manager::release(s_btLease); s_btLease=0;
+    _bleInited=false; _advRunning=false; _advertising=false;
 }
 
 void App07::_sendPacket(const uint8_t* data, uint8_t len)
 {
-    if (!_bleInited || len == 0) return;
+    if (!_bleInited || !bluetooth_manager::owns(s_btLease) || len == 0) return;
 
     /* New random-static MAC every packet → maximum device diversity.
      * esp_ble_gap_set_rand_addr() is non-blocking; the controller
@@ -667,6 +659,12 @@ void App07::_sendPacket(const uint8_t* data, uint8_t len)
 void App07::_startSpam()
 {
     _initBLE();
+    if (!_bleInited) {
+        _device->Lcd.fillRect(0,218,320,22,TFT_BLACK);
+        _device->Lcd.setCursor(6,218);
+        _device->Lcd.print(bluetooth_manager::enabled() ? "Bluetooth unavailable" : "Enable Bluetooth in Settings");
+        return;
+    }
     _advertising      = true;
     _packetCount      = 0;
     _lastAdvTime      = 0;
@@ -679,7 +677,7 @@ void App07::_startSpam()
 void App07::_stopSpam()
 {
     _advertising = false;
-    if (_bleInited && _advRunning) {
+    if (_bleInited && _advRunning && bluetooth_manager::owns(s_btLease)) {
         esp_ble_gap_stop_advertising();
         _advRunning = false;
     }
