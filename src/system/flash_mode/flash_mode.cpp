@@ -6,7 +6,7 @@
 
 #include <cstring>
 #include <esp_system.h>
-#include <soc/rtc_cntl_reg.h>
+#include "esp32-hal-tinyusb.h" // usb_persist_restart() / RESTART_BOOTLOADER
 
 namespace {
 
@@ -21,12 +21,20 @@ namespace flash_mode {
 
 void rebootToDownload()
 {
-    // Force the ROM to enter serial/USB download mode on the next reset,
-    // then reset. The bit lives in the RTC domain and is cleared by a power
-    // cycle, so after flashing a single power cycle returns to the app.
-    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    // Reboot into USB download mode. On the ESP32-S3 this must hand the USB PHY
+    // from the OTG/TinyUSB controller back to the ROM USB-Serial-JTAG and force
+    // a host re-enumerate *before* setting force-download-boot — otherwise the
+    // ROM downloader lands on UART0 and never enumerates over USB. Arduino's
+    // usb_persist_restart(RESTART_BOOTLOADER) does exactly that (it's the same
+    // path as the USB-CDC "1200 bps touch" auto-reset) and then resets.
+    //
+    // Known quirk: on some hosts this can stall when the board is plugged
+    // straight into a root port; it is reliable through a USB hub. It does not
+    // return — esp_restart() below is only a safety net if handler registration
+    // failed. A normal power cycle always recovers to the app.
+    usb_persist_restart(RESTART_BOOTLOADER);
     esp_restart();
-    while (true) { /* unreachable: esp_restart() does not return */ }
+    while (true) { /* unreachable */ }
 }
 
 void poll(Stream& io)

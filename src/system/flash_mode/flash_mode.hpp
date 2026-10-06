@@ -4,9 +4,9 @@
  *
  * Developer convenience so re-flashing does not require the physical BOOT
  * button. When the trigger token arrives on the USB-CDC console, the firmware
- * sets the ESP32-S3 force-download-boot bit and resets straight into the ROM
- * serial/USB downloader — exactly the state esptool needs. A normal power
- * cycle clears the bit and boots the app again.
+ * switches the USB PHY back to the ROM USB-Serial-JTAG and resets into the USB
+ * downloader (via Arduino's usb_persist_restart) — exactly the state esptool
+ * needs over USB. A normal power cycle boots the app again.
  */
 #pragma once
 
