@@ -302,6 +302,65 @@ int httpRequest(lua_State* L, bool isPost)
 int l_http_get(lua_State* L)  { return httpRequest(L, false); }
 int l_http_post(lua_State* L) { return httpRequest(L, true);  }
 
+// ── mk.audio (speaker: ES8311 DAC → NS4150B amp) ─────────────────────
+// Sine tones are the worst case for the 1 W speaker, so tone output is clamped
+// well under the firmware's own SPK_VOLUME_MAX ceiling.
+constexpr int kToneVolMax = 30;
+
+void audio_ensure()
+{
+    if (!g_dev->speaker.isEnabled()) g_dev->speaker.begin();
+}
+
+// Power the NS4150B only around playback, mute-gated to avoid pops
+// (mirrors system_sound.cpp's amp() sequence).
+void audio_amp(bool on)
+{
+    if (on) {
+        g_dev->speaker.setMute(true);
+        g_dev->io_exp.digitalWrite(HAL_IOEXP_PA_EN, HIGH);
+        g_dev->speaker.setMute(false);
+    } else {
+        g_dev->speaker.setMute(true);
+        g_dev->io_exp.digitalWrite(HAL_IOEXP_PA_EN, LOW);
+    }
+}
+
+int l_audio_tone(lua_State* L)
+{
+    uint32_t f  = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t ms = (uint32_t)luaL_checkinteger(L, 2);
+    int vol     = (int)luaL_optinteger(L, 3, 20);
+    if (ms > 5000) ms = 5000;              // cap duration
+    if (vol < 0) vol = 0;
+    if (vol > kToneVolMax) vol = kToneVolMax;
+    audio_ensure();
+    audio_amp(true);
+    g_dev->speaker.tone(f, ms, vol);       // blocking
+    audio_amp(false);
+    return 0;
+}
+
+int l_audio_beep(lua_State* L)
+{
+    (void)L;
+    audio_ensure();
+    audio_amp(true);
+    g_dev->speaker.tone(880, 120, kToneVolMax);
+    audio_amp(false);
+    return 0;
+}
+
+int l_audio_volume(lua_State* L)
+{
+    int v = (int)luaL_checkinteger(L, 1);
+    if (v < 0) v = 0;
+    if (v > SPK_VOLUME_MAX) v = SPK_VOLUME_MAX;  // firmware's enforced ceiling
+    audio_ensure();
+    lua_pushboolean(L, g_dev->speaker.setVolume(v));
+    return 1;
+}
+
 void registerSub(lua_State* L, const char* name, const luaL_Reg* funcs)
 {
     lua_newtable(L);
@@ -346,6 +405,10 @@ void install(lua_State* L, DEVICES* device)
     static const luaL_Reg http[] = {
         { "get", l_http_get }, { "post", l_http_post }, { nullptr, nullptr }
     };
+    static const luaL_Reg audio[] = {
+        { "tone", l_audio_tone }, { "beep", l_audio_beep }, { "volume", l_audio_volume },
+        { nullptr, nullptr }
+    };
 
     registerSub(L, "display", disp);
     registerSub(L, "input",   input);
@@ -354,6 +417,7 @@ void install(lua_State* L, DEVICES* device)
     registerSub(L, "sys",     sys);
     registerSub(L, "wifi",    wifi);
     registerSub(L, "http",    http);
+    registerSub(L, "audio",   audio);
 
     lua_pushcfunction(L, l_color);
     lua_setfield(L, -2, "color");
