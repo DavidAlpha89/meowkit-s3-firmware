@@ -18,7 +18,7 @@ local function draw()
 end
 
 function on_open()
-  mk.audio.volume(18)
+  mk.audio.volume(40)
   draw()
 end
 
@@ -26,7 +26,7 @@ function on_running(dt)
   for _, k in ipairs(order) do
     local d = mk.input.down(k)
     if d and not prev[k] then
-      mk.audio.tone(notes[k], 180, 18)   -- blocking ~180 ms
+      mk.audio.tone(notes[k], 180, 40)   -- blocking ~180 ms
       last = k .. "  (" .. notes[k] .. " Hz)"
       draw()
     end

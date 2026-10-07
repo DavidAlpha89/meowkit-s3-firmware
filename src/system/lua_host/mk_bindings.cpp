@@ -304,24 +304,27 @@ int l_http_post(lua_State* L) { return httpRequest(L, true);  }
 
 // ── mk.audio (speaker: ES8311 DAC → NS4150B amp) ─────────────────────
 // Sine tones are the worst case for the 1 W speaker, so tone output is clamped
-// well under the firmware's own SPK_VOLUME_MAX ceiling.
-constexpr int kToneVolMax = 30;
+// under the firmware's own SPK_VOLUME_MAX ceiling.
+constexpr int kToneVolMax  = 50;
+constexpr int kAmpDrainMs  = 60;   // let I2S DMA empty before cutting the amp
 
 void audio_ensure()
 {
     if (!g_dev->speaker.isEnabled()) g_dev->speaker.begin();
 }
 
-// Power the NS4150B only around playback, mute-gated to avoid pops
-// (mirrors system_sound.cpp's amp() sequence).
+// Power the NS4150B only around playback, mute-gated to avoid pops, with the
+// same settle delays as the (audible) system_sound.cpp amp() sequence.
 void audio_amp(bool on)
 {
     if (on) {
         g_dev->speaker.setMute(true);
         g_dev->io_exp.digitalWrite(HAL_IOEXP_PA_EN, HIGH);
+        delay(12);                       // NS4150B turn-on settle
         g_dev->speaker.setMute(false);
     } else {
         g_dev->speaker.setMute(true);
+        delay(4);
         g_dev->io_exp.digitalWrite(HAL_IOEXP_PA_EN, LOW);
     }
 }
@@ -330,13 +333,16 @@ int l_audio_tone(lua_State* L)
 {
     uint32_t f  = (uint32_t)luaL_checkinteger(L, 1);
     uint32_t ms = (uint32_t)luaL_checkinteger(L, 2);
-    int vol     = (int)luaL_optinteger(L, 3, 20);
+    int vol     = (int)luaL_optinteger(L, 3, 30);
     if (ms > 5000) ms = 5000;              // cap duration
     if (vol < 0) vol = 0;
     if (vol > kToneVolMax) vol = kToneVolMax;
     audio_ensure();
+    Serial.printf("[mk.audio] tone f=%u ms=%u vol=%d spk_enabled=%d\n",
+                  (unsigned)f, (unsigned)ms, vol, (int)g_dev->speaker.isEnabled());
     audio_amp(true);
-    g_dev->speaker.tone(f, ms, vol);       // blocking
+    g_dev->speaker.tone(f, ms, vol);       // blocking (writes into I2S DMA)
+    delay(kAmpDrainMs);                    // drain DMA before the amp cuts
     audio_amp(false);
     return 0;
 }
@@ -347,6 +353,7 @@ int l_audio_beep(lua_State* L)
     audio_ensure();
     audio_amp(true);
     g_dev->speaker.tone(880, 120, kToneVolMax);
+    delay(kAmpDrainMs);
     audio_amp(false);
     return 0;
 }
