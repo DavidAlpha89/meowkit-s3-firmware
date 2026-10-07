@@ -11,6 +11,7 @@
 #include <HTTPClient.h>
 #include <cstring>
 #include "../../bsp/devices.h"
+#include "../voice/voice_client.hpp"
 
 extern "C" {
 #include "lauxlib.h"
@@ -368,6 +369,53 @@ int l_audio_volume(lua_State* L)
     return 1;
 }
 
+// ── mk.voice (Xiaozhi-v3 WebSocket) ──────────────────────────────────
+
+int l_voice_start(lua_State* L)
+{
+    String url = luaL_checkstring(L, 1);
+    const char* device_id = luaL_checkstring(L, 2);
+    const char* token     = luaL_checkstring(L, 3);
+
+    if (!g_dev->wifi.isConnected()) {
+        lua_pushboolean(L, 0); lua_pushstring(L, "wifi not connected"); return 2;
+    }
+
+    // Parse ws://host[:port]/path (TLS/wss not needed for the local backend).
+    int scheme = url.indexOf("://");
+    if (scheme >= 0) url = url.substring(scheme + 3);
+    int slash = url.indexOf('/');
+    String hostport = (slash >= 0) ? url.substring(0, slash) : url;
+    String path     = (slash >= 0) ? url.substring(slash)    : String("/");
+    uint16_t port = 80;
+    String host = hostport;
+    int colon = hostport.indexOf(':');
+    if (colon >= 0) {
+        host = hostport.substring(0, colon);
+        port = (uint16_t)hostport.substring(colon + 1).toInt();
+    }
+    if (host.length() == 0 || port == 0) {
+        lua_pushboolean(L, 0); lua_pushstring(L, "bad url"); return 2;
+    }
+
+    g_voice.start(host, port, path, String(device_id), String(token));
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+int l_voice_poll(lua_State* L)
+{
+    g_voice.loop();
+    VoiceEvent ev;
+    if (!g_voice.popEvent(ev)) { lua_pushnil(L); return 1; }
+    lua_newtable(L);
+    lua_pushstring(L, ev.type.c_str()); lua_setfield(L, -2, "type");
+    if (ev.text.length()) { lua_pushstring(L, ev.text.c_str()); lua_setfield(L, -2, "text"); }
+    return 1;
+}
+
+int l_voice_stop(lua_State* L) { (void)L; g_voice.stop(); return 0; }
+
 void registerSub(lua_State* L, const char* name, const luaL_Reg* funcs)
 {
     lua_newtable(L);
@@ -416,6 +464,10 @@ void install(lua_State* L, DEVICES* device)
         { "tone", l_audio_tone }, { "beep", l_audio_beep }, { "volume", l_audio_volume },
         { nullptr, nullptr }
     };
+    static const luaL_Reg voice[] = {
+        { "start", l_voice_start }, { "poll", l_voice_poll }, { "stop", l_voice_stop },
+        { nullptr, nullptr }
+    };
 
     registerSub(L, "display", disp);
     registerSub(L, "input",   input);
@@ -425,6 +477,7 @@ void install(lua_State* L, DEVICES* device)
     registerSub(L, "wifi",    wifi);
     registerSub(L, "http",    http);
     registerSub(L, "audio",   audio);
+    registerSub(L, "voice",   voice);
 
     lua_pushcfunction(L, l_color);
     lua_setfield(L, -2, "color");
