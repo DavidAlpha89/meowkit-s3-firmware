@@ -6,6 +6,9 @@
 
 #include <Arduino.h>
 #include <SD_MMC.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <cstring>
 #include "../../bsp/devices.h"
 
@@ -213,6 +216,92 @@ int l_color(lua_State* L)
     return 1;
 }
 
+// ── mk.wifi ──────────────────────────────────────────────────────────
+
+int l_wifi_connected(lua_State* L) { lua_pushboolean(L, g_dev->wifi.isConnected());        return 1; }
+int l_wifi_ip(lua_State* L)        { lua_pushstring(L, g_dev->wifi.getIP().c_str());        return 1; }
+int l_wifi_ssid(lua_State* L)      { lua_pushstring(L, g_dev->wifi.getSSID().c_str());      return 1; }
+int l_wifi_rssi(lua_State* L)      { lua_pushinteger(L, (lua_Integer)WiFi.RSSI());          return 1; }
+
+int l_wifi_connect(lua_State* L)
+{
+    const char* ssid = luaL_checkstring(L, 1);
+    const char* pass = luaL_optstring(L, 2, "");
+    // Non-blocking: starts the attempt; poll mk.wifi.connected() for the result.
+    bool started = g_dev->wifi.connect(ssid, pass, (int)luaL_optinteger(L, 3, 15000));
+    lua_pushboolean(L, started);
+    return 1;
+}
+
+// ── mk.http ──────────────────────────────────────────────────────────
+
+// Apply an optional {name=value, ...} header table at stack index `idx`.
+void applyHeaders(lua_State* L, int idx, HTTPClient& http)
+{
+    if (!lua_istable(L, idx)) return;
+    lua_pushnil(L);
+    while (lua_next(L, idx) != 0) {
+        if (lua_type(L, -2) == LUA_TSTRING && lua_isstring(L, -1)) {
+            http.addHeader(lua_tostring(L, -2), lua_tostring(L, -1));
+        }
+        lua_pop(L, 1); // pop value, keep key for lua_next
+    }
+}
+
+// Shared GET/POST. Blocking (fine for the cooperative model on a button press).
+// Returns (status:int, body:string) on success, or (nil, err:string).
+int httpRequest(lua_State* L, bool isPost)
+{
+    const char* url = luaL_checkstring(L, 1);
+    if (!g_dev->wifi.isConnected()) {
+        lua_pushnil(L); lua_pushstring(L, "wifi not connected"); return 2;
+    }
+
+    const bool https = (strncmp(url, "https", 5) == 0);
+    WiFiClientSecure sclient;
+    WiFiClient       client;
+    HTTPClient       http;
+    http.setConnectTimeout(8000);
+    http.setTimeout(8000);
+
+    bool ok;
+    if (https) {
+        sclient.setInsecure();           // dev default: accept any/self-signed cert
+        ok = http.begin(sclient, url);
+    } else {
+        ok = http.begin(client, url);
+    }
+    if (!ok) { lua_pushnil(L); lua_pushstring(L, "http.begin failed (bad url?)"); return 2; }
+
+    int code;
+    if (isPost) {
+        size_t blen = 0;
+        const char* body  = luaL_optlstring(L, 2, "", &blen);
+        const char* ctype = luaL_optstring(L, 3, "application/json");
+        http.addHeader("Content-Type", ctype);
+        applyHeaders(L, 4, http);
+        code = http.POST((uint8_t*)body, blen);
+    } else {
+        applyHeaders(L, 2, http);
+        code = http.GET();
+    }
+
+    if (code <= 0) {
+        String err = HTTPClient::errorToString(code);
+        http.end();
+        lua_pushnil(L); lua_pushstring(L, err.c_str()); return 2;
+    }
+
+    String payload = http.getString();
+    http.end();
+    lua_pushinteger(L, code);
+    lua_pushlstring(L, payload.c_str(), payload.length());
+    return 2;
+}
+
+int l_http_get(lua_State* L)  { return httpRequest(L, false); }
+int l_http_post(lua_State* L) { return httpRequest(L, true);  }
+
 void registerSub(lua_State* L, const char* name, const luaL_Reg* funcs)
 {
     lua_newtable(L);
@@ -250,12 +339,21 @@ void install(lua_State* L, DEVICES* device)
         { "log", l_sys_log }, { "exit", l_sys_exit }, { "heap", l_sys_heap },
         { "psram", l_sys_psram }, { nullptr, nullptr }
     };
+    static const luaL_Reg wifi[] = {
+        { "connected", l_wifi_connected }, { "ip", l_wifi_ip }, { "ssid", l_wifi_ssid },
+        { "rssi", l_wifi_rssi }, { "connect", l_wifi_connect }, { nullptr, nullptr }
+    };
+    static const luaL_Reg http[] = {
+        { "get", l_http_get }, { "post", l_http_post }, { nullptr, nullptr }
+    };
 
     registerSub(L, "display", disp);
     registerSub(L, "input",   input);
     registerSub(L, "fs",      fs);
     registerSub(L, "time",    tmr);
     registerSub(L, "sys",     sys);
+    registerSub(L, "wifi",    wifi);
+    registerSub(L, "http",    http);
 
     lua_pushcfunction(L, l_color);
     lua_setfield(L, -2, "color");
