@@ -12,6 +12,12 @@
 #include <cstring>
 #include "../../bsp/devices.h"
 #include "../voice/voice_client.hpp"
+#include "mk_ws.hpp"
+#include <ArduinoJson.h>
+#include <esp_system.h>
+#include "mbedtls/sha256.h"
+#include "mbedtls/md.h"
+#include "mbedtls/base64.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -423,6 +429,262 @@ void registerSub(lua_State* L, const char* name, const luaL_Reg* funcs)
     lua_setfield(L, -2, name); // mk[name] = subtable  (mk is at -2)
 }
 
+// ── mk.ws (generic WebSocket transport) ──────────────────────────────
+
+int l_ws_connect(lua_State* L)
+{
+    const char* host = luaL_checkstring(L, 1);
+    int         port = (int)luaL_checkinteger(L, 2);
+    const char* path = luaL_optstring(L, 3, "/");
+    const char* sub  = nullptr;
+    const char* hdrs = nullptr;
+    if (lua_istable(L, 4)) {
+        lua_getfield(L, 4, "subprotocol");
+        if (lua_isstring(L, -1)) sub = lua_tostring(L, -1);
+        lua_getfield(L, 4, "headers");
+        if (lua_isstring(L, -1)) hdrs = lua_tostring(L, -1);
+        lua_pop(L, 2);
+    }
+    lua_pushboolean(L, g_ws.start(host, (uint16_t)port, path,
+                                  sub ? sub : "", hdrs ? hdrs : ""));
+    return 1;
+}
+
+int l_ws_poll(lua_State* L)
+{
+    g_ws.loop();                       // pump the socket once per call
+    WsEvent ev;
+    if (!g_ws.popEvent(ev)) { lua_pushnil(L); return 1; }
+    lua_createtable(L, 0, 3);
+    lua_pushstring(L, ev.type.c_str());  lua_setfield(L, -2, "type");
+    if (ev.text.length()) { lua_pushlstring(L, ev.text.c_str(), ev.text.length()); lua_setfield(L, -2, "text"); }
+    if (ev.data.length()) { lua_pushlstring(L, ev.data.c_str(), ev.data.length()); lua_setfield(L, -2, "data"); }
+    return 1;
+}
+
+int l_ws_send(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    lua_pushboolean(L, g_ws.sendText(String(s, len)));
+    return 1;
+}
+
+int l_ws_send_bin(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    lua_pushboolean(L, g_ws.sendBinary((const uint8_t*)s, len));
+    return 1;
+}
+
+int l_ws_connected(lua_State* L) { lua_pushboolean(L, g_ws.connected()); return 1; }
+int l_ws_close(lua_State* L)     { g_ws.stop(); return 0; }
+
+// ── mk.crypto (mbedtls: gadget handshake needs sha256/HMAC/base64) ───
+
+int l_sha256_hex(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    unsigned char out[32];
+    mbedtls_sha256((const unsigned char*)s, len, out, 0);
+    static const char* hex = "0123456789abcdef";
+    char str[65];
+    for (int i = 0; i < 32; i++) { str[i*2] = hex[out[i] >> 4]; str[i*2+1] = hex[out[i] & 0xF]; }
+    str[64] = '\0';
+    lua_pushlstring(L, str, 64);
+    return 1;
+}
+
+int l_hmac_sha256(lua_State* L)
+{
+    size_t klen, mlen;
+    const char* key = luaL_checklstring(L, 1, &klen);
+    const char* msg = luaL_checklstring(L, 2, &mlen);
+    unsigned char out[32];
+    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    int rc = mbedtls_md_hmac(info, (const unsigned char*)key, klen,
+                             (const unsigned char*)msg, mlen, out);
+    if (rc != 0) { lua_pushnil(L); lua_pushinteger(L, rc); return 2; }
+    lua_pushlstring(L, (const char*)out, 32);
+    return 1;
+}
+
+int l_b64_encode(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    size_t olen = 0;
+    mbedtls_base64_encode(nullptr, 0, &olen, (const unsigned char*)s, len);
+    std::string out(olen, '\0');
+    if (mbedtls_base64_encode((unsigned char*)&out[0], out.size(), &olen,
+                              (const unsigned char*)s, len) != 0) {
+        lua_pushnil(L); return 1;
+    }
+    out.resize(olen);
+    lua_pushlstring(L, out.data(), out.size());
+    return 1;
+}
+
+int l_b64_decode(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    std::string out(len, '\0');
+    size_t olen = 0;
+    if (mbedtls_base64_decode((unsigned char*)&out[0], out.size(), &olen,
+                              (const unsigned char*)s, len) != 0) {
+        lua_pushnil(L); return 1;
+    }
+    lua_pushlstring(L, out.data(), olen);
+    return 1;
+}
+
+int l_random(lua_State* L)
+{
+    int n = (int)luaL_checkinteger(L, 1);
+    if (n < 0) n = 0;
+    if (n > 512) n = 512;
+    std::string out(n, '\0');
+    esp_fill_random(&out[0], n);
+    lua_pushlstring(L, out.data(), n);
+    return 1;
+}
+
+// ── mk.json (ArduinoJson bridge; binary-safe strings) ────────────────
+
+static void pushJsonValue(lua_State* L, JsonVariantConst v)
+{
+    if (v.isNull())      { lua_pushnil(L); return; }
+    if (v.is<bool>())    { lua_pushboolean(L, v.as<bool>()); return; }
+    if (v.is<int64_t>()) { lua_pushinteger(L, (lua_Integer)v.as<int64_t>()); return; }
+    if (v.is<float>() || v.is<double>()) { lua_pushnumber(L, v.as<double>()); return; }
+    if (v.is<const char*>()) {
+        String s = v.as<String>();
+        lua_pushlstring(L, s.c_str(), s.length());
+        return;
+    }
+    if (v.is<JsonArrayConst>()) {
+        JsonArrayConst arr = v.as<JsonArrayConst>();
+        lua_createtable(L, arr.size(), 0);
+        int i = 1;
+        for (JsonVariantConst e : arr) { pushJsonValue(L, e); lua_rawseti(L, -2, i++); }
+        return;
+    }
+    if (v.is<JsonObjectConst>()) {
+        JsonObjectConst obj = v.as<JsonObjectConst>();
+        lua_createtable(L, 0, obj.size());
+        for (auto kv : obj) {
+            lua_pushlstring(L, kv.key().c_str(), kv.key().size());
+            pushJsonValue(L, kv.value());
+            lua_settable(L, -3);
+        }
+        return;
+    }
+    lua_pushnil(L);
+}
+
+int l_json_decode(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, s, len);
+    if (err) { lua_pushnil(L); lua_pushstring(L, err.c_str()); return 2; }
+    pushJsonValue(L, doc.as<JsonVariantConst>());
+    return 1;
+}
+
+static bool luaToJson(lua_State* L, int idx, JsonVariant out, int depth)
+{
+    if (depth > 32) return false;
+    switch (lua_type(L, idx)) {
+    case LUA_TNIL: case LUA_TNONE:     out.clear(); return true;
+    case LUA_TBOOLEAN:                out.set(lua_toboolean(L, idx) != 0); return true;
+    case LUA_TNUMBER:
+        if (lua_isinteger(L, idx)) out.set((int64_t)lua_tointeger(L, idx));
+        else                       out.set((double)lua_tonumber(L, idx));
+        return true;
+    case LUA_TSTRING: {
+        size_t len; const char* s = lua_tolstring(L, idx, &len);
+        out.set(String(s, len));
+        return true;
+    }
+    case LUA_TTABLE: {
+        // Array iff keys are exactly 1..#t with no hash part.
+        int n = (int)lua_rawlen(L, idx);
+        bool isArray = n > 0;
+        for (int i = 1; i <= n && isArray; i++) {
+            lua_rawgeti(L, idx, i);
+            isArray = lua_type(L, -1) != LUA_TNIL;
+            lua_pop(L, 1);
+        }
+        if (isArray) {
+            JsonArray arr = out.to<JsonArray>();
+            for (int i = 1; i <= n; i++) {
+                lua_rawgeti(L, idx, i);
+                if (!luaToJson(L, lua_gettop(L), arr.add<JsonVariant>(), depth + 1)) { lua_pop(L, 1); return false; }
+                lua_pop(L, 1);
+            }
+            return true;
+        }
+        JsonObject obj = out.to<JsonObject>();
+        lua_pushnil(L);                       // first key
+        while (lua_next(L, idx) != 0) {
+            if (lua_type(L, -2) != LUA_TSTRING) { lua_pop(L, 2); return false; }
+            size_t klen; const char* k = lua_tolstring(L, -2, &klen);
+            if (!luaToJson(L, lua_gettop(L), obj[k], depth + 1)) { lua_pop(L, 2); return false; }
+            lua_pop(L, 1);                    // drop value, keep key for next iteration
+        }
+        return true;
+    }
+    default:
+        return false;                         // functions/userdata never serialize
+    }
+}
+
+int l_json_encode(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    JsonDocument doc;
+    if (!luaToJson(L, 1, doc.to<JsonVariant>(), 0)) {
+        lua_pushnil(L); lua_pushstring(L, "value not JSON-serializable"); return 2;
+    }
+    std::string out;
+    serializeJson(doc, out);
+    lua_pushlstring(L, out.data(), out.size());
+    return 1;
+}
+
+// ── mk.audio PCM streaming (gadget TTS: hold the amp across a stream) ──
+
+bool     s_audio_streaming = false;
+uint32_t s_audio_rate      = 16000;
+
+int l_audio_stream_start(lua_State* L)
+{
+    s_audio_rate = (uint32_t)luaL_optinteger(L, 1, 16000);
+    audio_ensure();
+    audio_amp(true);
+    s_audio_streaming = true;
+    return 0;
+}
+
+int l_audio_stream_write(lua_State* L)
+{
+    size_t len; const char* s = luaL_checklstring(L, 1, &len);
+    if (!s_audio_streaming) { lua_pushboolean(L, false); return 1; }
+    if (len > 256 * 1024) len = 256 * 1024;      // sanity cap per chunk
+    if (len >= 2)
+        g_dev->speaker.playPcm((const int16_t*)s, len / 2, 1, s_audio_rate);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int l_audio_stream_stop(lua_State* L)
+{
+    if (!s_audio_streaming) return 0;
+    delay(kAmpDrainMs);                          // drain DMA before the amp cuts
+    audio_amp(false);
+    s_audio_streaming = false;
+    return 0;
+}
+
 } // namespace
 
 namespace mk_bindings {
@@ -462,10 +724,27 @@ void install(lua_State* L, DEVICES* device)
     };
     static const luaL_Reg audio[] = {
         { "tone", l_audio_tone }, { "beep", l_audio_beep }, { "volume", l_audio_volume },
+        { "stream_start", l_audio_stream_start }, { "stream_write", l_audio_stream_write },
+        { "stream_stop", l_audio_stream_stop },
         { nullptr, nullptr }
     };
     static const luaL_Reg voice[] = {
         { "start", l_voice_start }, { "poll", l_voice_poll }, { "stop", l_voice_stop },
+        { nullptr, nullptr }
+    };
+    static const luaL_Reg ws[] = {
+        { "connect", l_ws_connect }, { "poll", l_ws_poll }, { "send", l_ws_send },
+        { "send_bin", l_ws_send_bin }, { "connected", l_ws_connected }, { "close", l_ws_close },
+        { nullptr, nullptr }
+    };
+    static const luaL_Reg crypto[] = {
+        { "sha256_hex", l_sha256_hex }, { "hmac_sha256", l_hmac_sha256 },
+        { "b64_encode", l_b64_encode }, { "b64_decode", l_b64_decode },
+        { "random", l_random },
+        { nullptr, nullptr }
+    };
+    static const luaL_Reg json[] = {
+        { "decode", l_json_decode }, { "encode", l_json_encode },
         { nullptr, nullptr }
     };
 
@@ -478,6 +757,9 @@ void install(lua_State* L, DEVICES* device)
     registerSub(L, "http",    http);
     registerSub(L, "audio",   audio);
     registerSub(L, "voice",   voice);
+    registerSub(L, "ws",      ws);
+    registerSub(L, "crypto",  crypto);
+    registerSub(L, "json",    json);
 
     lua_pushcfunction(L, l_color);
     lua_setfield(L, -2, "color");
